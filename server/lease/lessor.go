@@ -282,10 +282,16 @@ func (le *lessor) SetCheckpointer(cp Checkpointer) {
 
 func (le *lessor) Grant(id LeaseID, ttl int64) (*Lease, error) {
 	if id == NoLease {
+		if le.lg != nil {
+			le.lg.Debug("Grant failed: NoLease ID provided")
+		}
 		return nil, ErrLeaseNotFound
 	}
 
 	if ttl > MaxLeaseTTL {
+		if le.lg != nil {
+			le.lg.Debug("Grant failed: TTL too large", zap.Int64("ttl", ttl))
+		}
 		return nil, ErrLeaseTTLTooLarge
 	}
 
@@ -297,6 +303,9 @@ func (le *lessor) Grant(id LeaseID, ttl int64) (*Lease, error) {
 	defer le.mu.Unlock()
 
 	if _, ok := le.leaseMap[id]; ok {
+		if le.lg != nil {
+			le.lg.Debug("Grant failed: Lease already exists", zap.Int64("leaseID", int64(id)))
+		}
 		return nil, ErrLeaseExists
 	}
 
@@ -306,8 +315,14 @@ func (le *lessor) Grant(id LeaseID, ttl int64) (*Lease, error) {
 
 	if le.isPrimary() {
 		l.refresh(0)
+		if le.lg != nil {
+			le.lg.Debug("Grant: Lease refreshed", zap.Int64("leaseID", int64(id)), zap.Int64("ttl", l.ttl))
+		}
 	} else {
 		l.forever()
+		if le.lg != nil {
+			le.lg.Debug("Grant: Lease set to forever", zap.Int64("leaseID", int64(id)))
+		}
 	}
 
 	le.leaseMap[id] = l
@@ -316,10 +331,17 @@ func (le *lessor) Grant(id LeaseID, ttl int64) (*Lease, error) {
 	leaseTotalTTLs.Observe(float64(l.ttl))
 	leaseGranted.Inc()
 
+	if le.lg != nil {
+		le.lg.Debug("Grant: Lease granted", zap.Int64("leaseID", int64(id)), zap.Int64("ttl", l.ttl))
+	}
+
 	if le.isPrimary() {
 		item := &LeaseWithTime{id: l.ID, time: l.expiry}
 		le.leaseExpiredNotifier.RegisterOrUpdate(item)
 		le.scheduleCheckpointIfNeeded(l)
+		if le.lg != nil {
+			le.lg.Debug("Grant: Lease registered for expiration and checkpoint", zap.Int64("leaseID", int64(id)))
+		}
 	}
 
 	return l, nil
